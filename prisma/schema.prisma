@@ -1,0 +1,147 @@
+// Multi-tenant Shopify Analytics Platform Schema
+// Each tenant is isolated via tenant_id with indexes for performance
+
+generator client {
+  provider = "prisma-client-js"
+  engineType = "library"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Tenant: Each Shopify store
+model Tenant {
+  id            Int       @id @default(autoincrement())
+  name          String
+  shopDomain    String    @unique // e.g., mystore.myshopify.com
+  apiKey        String?   @db.Text
+  apiSecret     String?   @db.Text
+  accessToken   String?   @db.Text
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  users         User[]
+  products      Product[]
+  customers     Customer[]
+  orders        Order[]
+  cartEvents    CartEvent[]
+  
+  @@index([shopDomain])
+}
+
+// User: Belongs to one tenant
+model User {
+  id            Int       @id @default(autoincrement())
+  email         String    @unique
+  firstName     String?
+  lastName      String?
+  password      String    // bcrypt hashed
+  role          String    @default("user") // admin or user
+  tenantId      Int
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  @@index([tenantId])
+  @@index([email])
+  @@index([tenantId, email])
+}
+
+// Product: Synced from Shopify
+model Product {
+  id                Int       @id @default(autoincrement())
+  shopifyProductId  String
+  title             String
+  description       String?   @db.Text
+  vendor            String?
+  productType       String?
+  price             Decimal   @db.Decimal(10, 2)
+  compareAtPrice    Decimal?  @db.Decimal(10, 2)
+  inventory         Int       @default(0)
+  sku               String?
+  imageUrl          String?   @db.Text
+  status            String    @default("active") // active, draft, archived
+  tenantId          Int
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  tenant            Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  @@unique([tenantId, shopifyProductId])
+  @@index([tenantId])
+  @@index([tenantId, status])
+}
+
+// Customer: Synced from Shopify
+model Customer {
+  id                Int       @id @default(autoincrement())
+  shopifyCustomerId String
+  email             String
+  firstName         String?
+  lastName          String?
+  phone             String?
+  totalSpent        Decimal   @db.Decimal(10, 2) @default(0)
+  ordersCount       Int       @default(0)
+  city              String?
+  country           String?
+  tenantId          Int
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  tenant            Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orders            Order[]
+  
+  @@unique([tenantId, shopifyCustomerId])
+  @@index([tenantId])
+  @@index([tenantId, email])
+  @@index([tenantId, totalSpent])
+}
+
+// Order: Synced from Shopify
+model Order {
+  id              Int       @id @default(autoincrement())
+  shopifyOrderId  String
+  orderNumber     String
+  customerId      Int?
+  customerEmail   String?
+  totalPrice      Decimal   @db.Decimal(10, 2)
+  subtotalPrice   Decimal   @db.Decimal(10, 2)
+  totalTax        Decimal   @db.Decimal(10, 2) @default(0)
+  currency        String    @default("USD")
+  financialStatus String    @default("pending") // pending, paid, refunded
+  fulfillmentStatus String? // fulfilled, partial, unfulfilled
+  lineItemsCount  Int       @default(0)
+  tenantId        Int
+  orderDate       DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer        Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  
+  @@unique([tenantId, shopifyOrderId])
+  @@index([tenantId])
+  @@index([tenantId, orderDate])
+  @@index([tenantId, customerId])
+  @@index([tenantId, financialStatus])
+}
+
+// CartEvent: Track cart activity (optional for abandoned cart analysis)
+model CartEvent {
+  id          Int       @id @default(autoincrement())
+  type        String    // started, abandoned, converted
+  cartValue   Decimal   @db.Decimal(10, 2)
+  cartToken   String?
+  customerEmail String?
+  tenantId    Int
+  timestamp   DateTime  @default(now())
+  
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  @@index([tenantId])
+  @@index([tenantId, timestamp])
+  @@index([tenantId, type])
+}
